@@ -1,7 +1,7 @@
 import { Channel, ConsumeMessage } from "amqplib";
 import { config } from "./config";
 import { assertOrderQueue, connectRabbit } from "./rabbit";
-import { setStatus } from "./statusStore";
+import { getOrder, setStatus } from "./statusStore";
 import { OrderMessage } from "./types";
 
 /** Thrown for problems that retrying can never fix (bad payload shape). */
@@ -44,6 +44,14 @@ async function handleMessage(channel: Channel, msg: ConsumeMessage): Promise<voi
   console.log(`[worker] received ${order.orderId} (tag ${tag}, redelivered=${msg.fields.redelivered})`);
 
   try {
+    // Idempotency guard: if this order already finished, a duplicate delivery must not redo the work.
+    const existing = await getOrder(order.orderId);
+    if (existing?.status === "completed") {
+      console.log(`[worker] duplicate delivery of ${order.orderId}: already completed, ACK and skip`);
+      channel.ack(msg);
+      return;
+    }
+
     await setStatus(order.orderId, "processing");
     await fulfillOrder(order);
     await setStatus(order.orderId, "completed");
