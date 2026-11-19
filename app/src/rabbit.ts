@@ -27,7 +27,21 @@ export async function connectRabbit(retries = 10, delayMs = 2000): Promise<Conne
   }
 }
 
-/** Declare the durable work queue. Safe to call from both API and worker. */
+/**
+ * Declare the durable work queue plus its dead-letter exchange and queue.
+ * Safe to call from both API and worker (they must declare identical arguments).
+ */
 export async function assertOrderQueue(channel: Channel | ConfirmChannel): Promise<void> {
-  await channel.assertQueue(config.queueName, { durable: true });
+  await channel.assertExchange(config.dlxName, "direct", { durable: true });
+  await channel.assertQueue(config.dlqName, { durable: true });
+  await channel.bindQueue(config.dlqName, config.dlxName, config.queueName);
+
+  
+  await channel.assertQueue(config.queueName, {
+    durable: true,
+    arguments: {
+      "x-dead-letter-exchange": config.dlxName,
+      "x-dead-letter-routing-key": config.queueName,
+    },
+  });
 }
